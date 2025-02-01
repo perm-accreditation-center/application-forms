@@ -1,9 +1,6 @@
 # Этап сборки
 FROM golang:1.23.0-alpine AS builder
 
-# Установка необходимых пакетов для сборки
-RUN apk add --no-cache gcc musl-dev
-
 WORKDIR /build
 
 # Копируем сначала только файлы зависимостей
