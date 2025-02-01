@@ -17,18 +17,25 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: nginx-proxy
+    container_name: nginx
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+      - "[::]:80:80"
+      - "[::]:443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/logs:/var/log/nginx
+      - ./certs:/etc/nginx/certs # if you have SSL certificates
     networks:
       - app-network
     depends_on:
-      - form-handler
+      - app
 
 networks:
   app-network:
     driver: bridge
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
