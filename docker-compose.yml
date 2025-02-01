@@ -1,37 +1,27 @@
-# docker-compose.yml
 services:
-  form-handler:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  app:
+    build: .
     container_name: form-handler
     restart: unless-stopped
-    environment:
-      - GIN_MODE=release
-    volumes:
-      - ./logs:/app/logs
     networks:
       - app-network
-    expose:
-      - "8080"
+    volumes:
+      - ./logs:/app/logs
 
   nginx:
     image: nginx:alpine
     container_name: nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-      - "[::]:80:80"
-      - "[::]:443:443"
+      - "8081:80"
+      - "[::]:8081:80"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/logs:/var/log/nginx
-      - ./certs:/etc/nginx/certs
     networks:
       - app-network
     depends_on:
-      - form-handler
+      - app
 
 networks:
   app-network:

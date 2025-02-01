@@ -24,6 +24,6 @@ COPY --from=builder /build/main .
 # Создаем директорию для логов
 RUN mkdir -p /app/logs
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["./main"]
