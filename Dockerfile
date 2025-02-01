@@ -1,25 +1,32 @@
-# Dockerfile
-FROM golang:1.23.0-alpine
+# Этап сборки
+FROM golang:1.23.0-alpine AS builder
+
+# Установка необходимых пакетов для сборки
+RUN apk add --no-cache gcc musl-dev
+
+WORKDIR /build
+
+# Копируем сначала только файлы зависимостей
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Копируем исходный код
+COPY . .
+
+# Собираем приложение
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+
+# Финальный этап
+FROM alpine:3.19
 
 WORKDIR /app
 
-# Install necessary build tools
-RUN apk add --no-cache gcc musl-dev
+# Копируем только бинарный файл из этапа сборки
+COPY --from=builder /build/main .
 
-# Copy go mod and sum files
-COPY go.mod go.sum ./
+# Создаем директорию для логов
+RUN mkdir -p /app/logs
 
-# Download dependencies
-RUN go mod download
-
-# Copy source code
-COPY . .
-
-# Build the application
-RUN go build -o main .
-
-# Expose port
 EXPOSE 8080
 
-# Run the application
 CMD ["./main"]
