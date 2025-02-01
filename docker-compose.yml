@@ -1,0 +1,36 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  form-handler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: form-handler
+    restart: unless-stopped
+    environment:
+      - GIN_MODE=release
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - app-network
+    expose:
+      - "8080"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/logs:/var/log/nginx
+    networks:
+      - app-network
+    depends_on:
+      - form-handler
+
+networks:
+  app-network:
+    driver: bridge
