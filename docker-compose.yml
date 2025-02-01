@@ -27,11 +27,11 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/logs:/var/log/nginx
-      - ./certs:/etc/nginx/certs # if you have SSL certificates
+      - ./certs:/etc/nginx/certs
     networks:
       - app-network
     depends_on:
-      - app
+      - form-handler
 
 networks:
   app-network:
