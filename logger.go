@@ -24,13 +24,11 @@ type FileLogger struct {
 func NewGoogleSheetsLogger(credentialsPath, spreadsheetID, sheetName string) (*GoogleSheetsLogger, error) {
 	ctx := context.Background()
 
-	// Read credentials file
 	credBytes, err := os.ReadFile(credentialsPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read credentials file: %v", err)
 	}
 
-	// Configure Google Sheets client
 	config, err := google.JWTConfigFromJSON(credBytes, sheets.SpreadsheetsScope)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %v", err)
@@ -50,7 +48,6 @@ func NewGoogleSheetsLogger(credentialsPath, spreadsheetID, sheetName string) (*G
 }
 
 func NewFileLogger(filename string) (*FileLogger, error) {
-	// Ensure log directory exists
 	logDir := filepath.Dir(filename)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %v", err)
@@ -65,7 +62,6 @@ func NewFileLogger(filename string) (*FileLogger, error) {
 }
 
 func (l *GoogleSheetsLogger) Log(submission *FormSubmission) error {
-	// Prepare row data
 	rowData := []interface{}{
 		submission.ID,
 		submission.CreationDate,

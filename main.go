@@ -34,7 +34,7 @@ type FormData struct {
 }
 
 func main() {
-	queueService := NewRedisQueue("localhost:6379")
+	queueService := NewRedisQueue("localhost:6381")
 
 	go processQueue(queueService)
 
