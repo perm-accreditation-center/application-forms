@@ -31,7 +31,7 @@ services:
     image: redis:alpine
     container_name: redis
     ports:
-      - "[::]:6379:6379"
+      - "[::]:6381:6379"
     networks:
       - app-network
     restart: unless-stopped

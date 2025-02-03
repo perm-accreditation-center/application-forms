@@ -1,0 +1,38 @@
+{
+	"info": {
+		"_postman_id": "909f86b1-ea76-4e0f-8933-d2446aec2e7f",
+		"name": "Form Submission API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "24860430"
+	},
+	"item": [
+		{
+			"name": "Submit Form",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n            \"date\": \"2024-02-03\",\r\n            \"time\": \"14:30\",\r\n            \"department\": \"Кафедра хирургии\",\r\n            \"event_type\": \"Практическое занятие\",\r\n            \"responsible_teacher_contact\": \"Иванов И.И. +7(999)123-45-67\",\r\n            \"schedule_coordinator_contact\": \"Петров П.П. +7(999)765-43-21 petrov@example.com\",\r\n            \"comments\": \"Требуется подготовка манекенов\",\r\n            \"group\": \"301\",\r\n            \"student_category\": \"Ординаторы\",\r\n            \"required_equipment_list\": \"Манекен, хирургические инструменты, расходные материалы\",\r\n            \"discipline\": \"Общая хирургия\",\r\n            \"practical_skills\": \"Наложение швов, обработка ран\",\r\n            \"specialty\": \"Хирургия\",\r\n            \"stations\": \"Станция 1, Станция 2\"\r\n          }\r\n"
+				},
+				"url": {
+					"raw": "http://localhost:8081/submit",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8081",
+					"path": [
+						"submit"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

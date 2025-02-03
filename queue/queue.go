@@ -1,4 +1,4 @@
-package main
+package queue
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"application-forms/common"
+	"application-forms/logger"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -26,7 +29,7 @@ func NewRedisQueue(addr string) *QueueService {
 	}
 }
 
-func (qs *QueueService) EnqueueSubmission(submission *FormSubmission) error {
+func (qs *QueueService) EnqueueSubmission(submission *common.FormSubmission) error {
 	jsonData, err := json.Marshal(submission)
 	if err != nil {
 		return fmt.Errorf("failed to marshal submission: %v", err)
@@ -40,8 +43,8 @@ func (qs *QueueService) EnqueueSubmission(submission *FormSubmission) error {
 	return nil
 }
 
-func processQueue(qs *QueueService) {
-	sheetsLogger, err := NewGoogleSheetsLogger(
+func ProcessQueue(qs *QueueService) {
+	sheetsLogger, err := logger.NewGoogleSheetsLogger(
 		"./credentials/credentials.json",
 		"1tbuC96BjI1Jude0EiXvS9f_lp-Q3tDAwIfgpTXpGVxA",
 		"Sheet1",
@@ -57,13 +60,14 @@ func processQueue(qs *QueueService) {
 			continue
 		}
 
-		var submission FormSubmission
+		var submission common.FormSubmission
 		if err := json.Unmarshal([]byte(result[1]), &submission); err != nil {
 			log.Printf("Error unmarshaling submission: %v", err)
 			continue
 		}
 
-		err = sheetsLogger.Log(&submission)
+		loggerSubmission := common.FormSubmission(submission)
+		err = sheetsLogger.Log(&loggerSubmission)
 		if err != nil {
 			submission.Status = "failed"
 			log.Printf("Failed to process submission %s: %v", submission.ID, err)

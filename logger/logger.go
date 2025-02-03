@@ -1,6 +1,7 @@
-package main
+package logger
 
 import (
+	"application-forms/common"
 	"context"
 	"fmt"
 	"os"
@@ -61,7 +62,7 @@ func NewFileLogger(filename string) (*FileLogger, error) {
 	return &FileLogger{file: file}, nil
 }
 
-func (l *GoogleSheetsLogger) Log(submission *FormSubmission) error {
+func (l *GoogleSheetsLogger) Log(submission *common.FormSubmission) error {
 	rowData := []interface{}{
 		submission.ID,
 		submission.CreationDate,
