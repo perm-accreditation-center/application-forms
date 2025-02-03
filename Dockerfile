@@ -21,6 +21,9 @@ WORKDIR /app
 # Копируем только бинарный файл из этапа сборки
 COPY --from=builder /build/main .
 
+# Копируем credentials
+COPY credentials ./credentials
+
 # Создаем директорию для логов
 RUN mkdir -p /app/logs
 
