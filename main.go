@@ -1,19 +1,45 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/option"
+	"google.golang.org/api/sheets/v4"
 )
+
+type FormSubmission struct {
+	ID                         string `json:"id"`
+	CreationDate               string `json:"creation_date"`
+	Date                       string `json:"date"`
+	Time                       string `json:"time"`
+	Department                 string `json:"department"`
+	EventType                  string `json:"event_type"`
+	ResponsibleTeacherContact  string `json:"responsible_teacher_contact"`
+	ScheduleCoordinatorContact string `json:"schedule_coordinator_contact"`
+	Comments                   string `json:"comments"`
+	Group                      string `json:"group"`
+	StudentCategory            string `json:"student_category"`
+	RequiredEquipmentList      string `json:"required_equipment_list"`
+	Discipline                 string `json:"discipline"`
+	PracticalSkills            string `json:"practical_skills"`
+	Specialty                  string `json:"specialty"`
+	Stations                   string `json:"stations"`
+}
+
+type GoogleSheetsLogger struct {
+	service     *sheets.Service
+	spreadsheet string
+	sheetName   string
+}
 
 // FormData represents the structure of incoming form data
 type FormData struct {
@@ -23,6 +49,34 @@ type FormData struct {
 // Logger configuration
 type FileLogger struct {
 	file *os.File
+}
+
+func NewGoogleSheetsLogger(credentialsPath, spreadsheetID, sheetName string) (*GoogleSheetsLogger, error) {
+	ctx := context.Background()
+
+	// Read credentials file
+	credBytes, err := os.ReadFile(credentialsPath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read credentials file: %v", err)
+	}
+
+	// Configure Google Sheets client
+	config, err := google.JWTConfigFromJSON(credBytes, sheets.SpreadsheetsScope)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse credentials: %v", err)
+	}
+
+	client := config.Client(ctx)
+	service, err := sheets.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve Sheets client: %v", err)
+	}
+
+	return &GoogleSheetsLogger{
+		service:     service,
+		spreadsheet: spreadsheetID,
+		sheetName:   sheetName,
+	}, nil
 }
 
 func NewFileLogger(filename string) (*FileLogger, error) {
@@ -40,53 +94,43 @@ func NewFileLogger(filename string) (*FileLogger, error) {
 	return &FileLogger{file: file}, nil
 }
 
-func (l *FileLogger) Log(data interface{}) error {
-	logEntry := struct {
-		Timestamp time.Time   `json:"timestamp"`
-		Data      interface{} `json:"data"`
-	}{
-		Timestamp: time.Now(),
-		Data:      data,
+func (l *GoogleSheetsLogger) Log(submission *FormSubmission) error {
+	// Prepare row data
+	rowData := []interface{}{
+		submission.ID,
+		submission.CreationDate,
+		submission.Date,
+		submission.Time,
+		submission.Department,
+		submission.EventType,
+		submission.ResponsibleTeacherContact,
+		submission.ScheduleCoordinatorContact,
+		submission.Comments,
+		submission.Group,
+		submission.StudentCategory,
+		submission.RequiredEquipmentList,
+		submission.Discipline,
+		submission.PracticalSkills,
+		submission.Specialty,
+		submission.Stations,
 	}
 
-	jsonData, err := json.Marshal(logEntry)
-	if err != nil {
-		return fmt.Errorf("failed to marshal log entry: %v", err)
+	// Append row to sheet
+	valueRange := &sheets.ValueRange{
+		Values: [][]interface{}{rowData},
 	}
 
-	if _, err := l.file.Write(append(jsonData, '\n')); err != nil {
-		return fmt.Errorf("failed to write to log file: %v", err)
-	}
+	_, err := l.service.Spreadsheets.Values.Append(
+		l.spreadsheet,
+		l.sheetName,
+		valueRange,
+	).ValueInputOption("RAW").Do()
 
-	return nil
+	return err
 }
 
 func (l *FileLogger) Close() error {
 	return l.file.Close()
-}
-
-// IPv6 CIDR validator for Yandex Forms network
-func isYandexIPv6(ip net.IP) bool {
-	yandexNetwork := net.IPNet{
-		IP:   net.ParseIP("2a02:6b8:c00::"),
-		Mask: net.CIDRMask(40, 128),
-	}
-	return yandexNetwork.Contains(ip)
-}
-
-// Middleware to check IPv6 address
-func ipv6Check() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ip := net.ParseIP(c.ClientIP())
-		if ip == nil || ip.To4() != nil || !isYandexIPv6(ip) {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Access denied: Invalid IPv6 address or not from Yandex network",
-			})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
 }
 
 // Retry configuration
@@ -96,98 +140,67 @@ type RetryConfig struct {
 	RetryStatus []int
 }
 
-func shouldRetry(statusCode int, config RetryConfig) bool {
-	for _, code := range config.RetryStatus {
-		if statusCode == code {
-			return true
-		}
-	}
-	return false
-}
-
 func main() {
-	// Initialize logger
+	sheetsLogger, err := NewGoogleSheetsLogger(
+		"./credentials/credentials.json",
+		"1tbuC96BjI1Jude0EiXvS9f_lp-Q3tDAwIfgpTXpGVxA",
+		"Sheet1",
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize Google Sheets logger: %v", err)
+	}
+
 	logger, err := NewFileLogger("logs/form_submissions.log")
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
 
-	// Initialize Gin
-	r := gin.Default()
-
-	// Configure retry settings
 	retryConfig := RetryConfig{
 		MaxRetries:  3,
 		RetryDelay:  time.Second * 2,
 		RetryStatus: []int{500, 502, 503, 504, 404},
 	}
 
-	// Form submission handler
-	r.POST("/submit", ipv6Check(), func(c *gin.Context) {
-		var formData FormData
+	r := gin.Default()
 
-		// Read the request body
-		bodyBytes, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
-			return
-		}
-		// Restore the request body for further processing
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	r.POST("/submit", func(c *gin.Context) {
+		var submission FormSubmission
 
 		// Parse JSON data
-		if err := c.ShouldBindJSON(&formData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+		if err := c.ShouldBindJSON(&submission); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid submission format"})
 			return
 		}
 
-		// Log the submission
-		if err := logger.Log(formData.Data); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log submission"})
-			return
-		}
+		// Generate unique ID
+		submission.ID = uuid.New().String()
+		submission.CreationDate = time.Now().Format(time.RFC3339)
 
-		// Process submission with retry logic
-		var processErr error
+		// Retry logging to Google Sheets
+		var logErr error
 		for retry := 0; retry <= retryConfig.MaxRetries; retry++ {
 			if retry > 0 {
 				time.Sleep(retryConfig.RetryDelay)
 			}
 
-			// Process the submission (example)
-			resp, err := processSubmission(formData.Data)
-			if err != nil {
-				processErr = err
-				continue
+			logErr = sheetsLogger.Log(&submission)
+			if logErr == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "success",
+					"message": "Form submission processed successfully",
+					"id":      submission.ID,
+				})
+				return
 			}
-
-			if shouldRetry(resp.StatusCode, retryConfig) {
-				processErr = fmt.Errorf("received status code: %d", resp.StatusCode)
-				continue
-			}
-
-			// Success
-			c.JSON(http.StatusOK, gin.H{
-				"status":  "success",
-				"message": "Form submission processed successfully",
-			})
-			return
 		}
 
-		// If we get here, all retries failed
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to process submission after %d retries: %v",
-				retryConfig.MaxRetries, processErr),
+			"error": fmt.Sprintf("Failed to log submission after %d retries: %v",
+				retryConfig.MaxRetries, logErr),
 		})
 	})
 
-	// Start server with IPv6 support
-	log.Fatal(r.Run("[::]:8081"))
-}
+	log.Fatal(r.Run(":8081"))
 
-// Mock function to simulate processing submission
-func processSubmission(data interface{}) (*http.Response, error) {
-	// In a real implementation, this would send the data to your backend service
-	return &http.Response{StatusCode: http.StatusOK}, nil
 }
