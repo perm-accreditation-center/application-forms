@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	queueService := queue.NewRedisQueue("127.0.0.1:6381")
+	queueService := queue.NewRedisQueue("redis:6379")
 
 	go queue.ProcessQueue(queueService)
 
