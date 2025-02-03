@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -17,22 +19,23 @@ import (
 )
 
 type FormSubmission struct {
-	ID                         string `json:"id"`
-	CreationDate               string `json:"creation_date"`
-	Date                       string `json:"date"`
-	Time                       string `json:"time"`
-	Department                 string `json:"department"`
-	EventType                  string `json:"event_type"`
-	ResponsibleTeacherContact  string `json:"responsible_teacher_contact"`
-	ScheduleCoordinatorContact string `json:"schedule_coordinator_contact"`
-	Comments                   string `json:"comments"`
-	Group                      string `json:"group"`
-	StudentCategory            string `json:"student_category"`
-	RequiredEquipmentList      string `json:"required_equipment_list"`
-	Discipline                 string `json:"discipline"`
-	PracticalSkills            string `json:"practical_skills"`
-	Specialty                  string `json:"specialty"`
-	Stations                   string `json:"stations"`
+	ID                         string    `json:"id"`
+	CreationDate               time.Time `json:"creation_date"`
+	Date                       string    `json:"date"`
+	Time                       string    `json:"time"`
+	Department                 string    `json:"department"`
+	EventType                  string    `json:"event_type"`
+	ResponsibleTeacherContact  string    `json:"responsible_teacher_contact"`
+	ScheduleCoordinatorContact string    `json:"schedule_coordinator_contact"`
+	Comments                   string    `json:"comments"`
+	Group                      string    `json:"group"`
+	StudentCategory            string    `json:"student_category"`
+	RequiredEquipmentList      string    `json:"required_equipment_list"`
+	Discipline                 string    `json:"discipline"`
+	PracticalSkills            string    `json:"practical_skills"`
+	Specialty                  string    `json:"specialty"`
+	Stations                   string    `json:"stations"`
+	Status                     string    `json:"status"`
 }
 
 type GoogleSheetsLogger struct {
@@ -49,6 +52,36 @@ type FormData struct {
 // Logger configuration
 type FileLogger struct {
 	file *os.File
+}
+
+type QueueService struct {
+	client *redis.Client
+	ctx    context.Context
+}
+
+func NewRedisQueue(addr string) *QueueService {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: addr,
+	})
+
+	return &QueueService{
+		client: rdb,
+		ctx:    context.Background(),
+	}
+}
+
+func (qs *QueueService) EnqueueSubmission(submission *FormSubmission) error {
+	jsonData, err := json.Marshal(submission)
+	if err != nil {
+		return fmt.Errorf("failed to marshal submission: %v", err)
+	}
+
+	err = qs.client.RPush(qs.ctx, "form_submissions", jsonData).Err()
+	if err != nil {
+		return fmt.Errorf("failed to enqueue submission: %v", err)
+	}
+
+	return nil
 }
 
 func NewGoogleSheetsLogger(credentialsPath, spreadsheetID, sheetName string) (*GoogleSheetsLogger, error) {
@@ -141,14 +174,9 @@ type RetryConfig struct {
 }
 
 func main() {
-	sheetsLogger, err := NewGoogleSheetsLogger(
-		"./credentials/credentials.json",
-		"1tbuC96BjI1Jude0EiXvS9f_lp-Q3tDAwIfgpTXpGVxA",
-		"Sheet1",
-	)
-	if err != nil {
-		log.Fatalf("Failed to initialize Google Sheets logger: %v", err)
-	}
+	queueService := NewRedisQueue("localhost:6379")
+
+	go processQueue(queueService)
 
 	logger, err := NewFileLogger("logs/form_submissions.log")
 	if err != nil {
@@ -156,51 +184,71 @@ func main() {
 	}
 	defer logger.Close()
 
-	retryConfig := RetryConfig{
-		MaxRetries:  3,
-		RetryDelay:  time.Second * 2,
-		RetryStatus: []int{500, 502, 503, 504, 404},
-	}
-
 	r := gin.Default()
 
 	r.POST("/submit", func(c *gin.Context) {
 		var submission FormSubmission
 
-		// Parse JSON data
 		if err := c.ShouldBindJSON(&submission); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid submission format"})
 			return
 		}
 
-		// Generate unique ID
 		submission.ID = uuid.New().String()
-		submission.CreationDate = time.Now().Format(time.RFC3339)
+		submission.CreationDate = time.Now()
+		submission.Status = "pending"
 
-		// Retry logging to Google Sheets
-		var logErr error
-		for retry := 0; retry <= retryConfig.MaxRetries; retry++ {
-			if retry > 0 {
-				time.Sleep(retryConfig.RetryDelay)
-			}
-
-			logErr = sheetsLogger.Log(&submission)
-			if logErr == nil {
-				c.JSON(http.StatusOK, gin.H{
-					"status":  "success",
-					"message": "Form submission processed successfully",
-					"id":      submission.ID,
-				})
-				return
-			}
+		err := queueService.EnqueueSubmission(&submission)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"error":  "Failed to queue submission",
+			})
+			return
 		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to log submission after %d retries: %v",
-				retryConfig.MaxRetries, logErr),
+		c.JSON(http.StatusAccepted, gin.H{
+			"status":  "success",
+			"message": "Form submission queued successfully",
+			"id":      submission.ID,
 		})
 	})
 
 	log.Fatal(r.Run(":8081"))
+}
 
+func processQueue(qs *QueueService) {
+	sheetsLogger, err := NewGoogleSheetsLogger(
+		"./credentials/credentials.json",
+		"1tbuC96BjI1Jude0EiXvS9f_lp-Q3tDAwIfgpTXpGVxA",
+		"Sheet1",
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize sheets logger: %v", err)
+	}
+
+	for {
+		result, err := qs.client.BLPop(qs.ctx, 0, "form_submissions").Result()
+		if err != nil {
+			log.Printf("Error polling queue: %v", err)
+			continue
+		}
+
+		var submission FormSubmission
+		if err := json.Unmarshal([]byte(result[1]), &submission); err != nil {
+			log.Printf("Error unmarshaling submission: %v", err)
+			continue
+		}
+
+		err = sheetsLogger.Log(&submission)
+		if err != nil {
+			submission.Status = "failed"
+			log.Printf("Failed to process submission %s: %v", submission.ID, err)
+		} else {
+			submission.Status = "completed"
+		}
+
+		statusKey := fmt.Sprintf("submission_status:%s", submission.ID)
+		qs.client.Set(qs.ctx, statusKey, submission.Status, 24*time.Hour)
+	}
 }
